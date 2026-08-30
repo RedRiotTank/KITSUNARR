@@ -697,24 +697,56 @@ class UnionFansubIndexer(BaseIndexer):
     # a una ficha para entregarlo a Sonarr o calcular su info hash.
     # ------------------------------------------------------------
     async def download_torrent(self, guid: str, cookie_string: str) -> bytes:
+        numeric_id = re.sub(r"[^\d]", "", guid or "")
+        if not numeric_id:
+            raise Exception(f"ID de torrent inválido: {guid}")
+
         headers = self._get_base_headers()
         headers["Cookie"] = cookie_string
-        headers["Referer"] = f"https://torrent.unionfansub.com/details.php?id={guid}"
+        headers["Referer"] = f"https://torrent.unionfansub.com/details.php?id={numeric_id}"
 
         async with httpx.AsyncClient(follow_redirects=True) as client:
-            primary_url = f"https://torrent.unionfansub.com/download.php?torrent={guid}"
-            resp = await client.get(primary_url, headers=headers, timeout=15.0)
-            resp.raise_for_status()
+            urls_to_try = [
+                f"https://torrent.unionfansub.com/download.php?torrent={numeric_id}",
+                f"https://torrent.unionfansub.com/download.php?id={numeric_id}"
+            ]
 
-            if resp.content.startswith(b"d8:announce"):
-                return resp.content
+            for url in urls_to_try:
+                resp = await client.get(url, headers=headers, timeout=15.0)
+                resp.raise_for_status()
 
-            fallback_url = f"https://torrent.unionfansub.com/download.php?id={guid}"
-            resp_fallback = await client.get(fallback_url, headers=headers, timeout=15.0)
-            resp_fallback.raise_for_status()
+                if resp.content.startswith(b"d8:announce"):
+                    return resp.content
 
-            if resp_fallback.content.startswith(b"d8:announce"):
-                return resp_fallback.content
+                soup = BeautifulSoup(resp.text, "lxml")
+                
+                download_btn = (
+                    soup.find("a", href=re.compile(r"download\.php\?.*?(?:id|torrent)=", re.IGNORECASE))
+                    or soup.find("a", string=re.compile(r"Descargar\s*Torrent", re.IGNORECASE))
+                    or soup.find("input", {"value": re.compile(r"Descargar", re.IGNORECASE)})
+                )
 
-            raise Exception("El tracker devolvió un archivo no válido (URL de descarga/cookie/referer).")
+                if download_btn:
+                    if download_btn.name == "a" and download_btn.get("href"):
+                        target_url = urllib.parse.urljoin("https://torrent.unionfansub.com/", download_btn["href"])
+                        headers["Referer"] = url
+                        resp_confirm = await client.get(target_url, headers=headers, timeout=15.0)
+                        if resp_confirm.content.startswith(b"d8:announce"):
+                            return resp_confirm.content
 
+                    elif download_btn.name == "input":
+                        form = download_btn.find_parent("form")
+                        if form:
+                            action = form.get("action") or url
+                            target_url = urllib.parse.urljoin("https://torrent.unionfansub.com/", action)
+                            form_data = {
+                                inp.get("name"): inp.get("value", "")
+                                for inp in form.find_all("input")
+                                if inp.get("name")
+                            }
+                            headers["Referer"] = url
+                            resp_confirm = await client.post(target_url, data=form_data, headers=headers, timeout=15.0)
+                            if resp_confirm.content.startswith(b"d8:announce"):
+                                return resp_confirm.content
+
+            raise Exception("El tracker no devolvió un archivo .torrent válido tras resolver el aviso.")
