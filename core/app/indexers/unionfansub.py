@@ -622,7 +622,7 @@ class UnionFansubIndexer(BaseIndexer):
                             await asyncio.sleep(1.5)
                         except Exception as e:
                             deep_scrape_errors += 1
-                            logger.error(f"❌ [INDEXER] [{self.name}] Error raspando ficha {torrent_id}: {e}")
+                            logger.error(f"❌ [INDEXER] [{self.name}] Error raspando ficha {source_guid}: {e}")
 
             logger.debug(
                 f"✅ [INDEXER] [{self.name}] Búsqueda completada para '{query}': "
