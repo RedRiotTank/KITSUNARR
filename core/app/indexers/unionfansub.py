@@ -571,7 +571,10 @@ class UnionFansubIndexer(BaseIndexer):
                     else:
                         deep_scraped += 1
                         details_url = f"https://torrent.unionfansub.com/details.php?id={source_guid}&hit=1"
-                        
+                        # El fansub de la lista es el valor por defecto; solo se
+                        # sustituye si la ficha detallada aporta uno mejor.
+                        formatted_fansub = incoming_fansub
+
                         try:
                             details_resp = await client.get(details_url, headers=headers)
                             ficha_data = self._parse_ficha_metadata(details_resp.text)
