@@ -1,4 +1,8 @@
 import hashlib
+import re
+import unicodedata
+import urllib.parse
+
 import bencodepy
 import jwt
 from fastapi import APIRouter, Request, HTTPException, Query
@@ -24,6 +28,25 @@ def _resolve_source_guid(db_torrent: TorrentCache, guid: str) -> str:
     if "-" in guid:
         return guid.split("-", 1)[1]
     return guid
+
+# ------------------------------------------------------------
+# Construye la cabecera Content-Disposition del .torrent. Las cabeceras
+# HTTP solo admiten latin-1, y los titulos de Union Fansub pueden traer
+# simbolos fuera de ese rango (por ejemplo la estrella de
+# "Lovely★Complex" o kanji), lo que rompia la respuesta con
+# UnicodeEncodeError. Se entrega un nombre ASCII de respaldo mas el
+# nombre real codificado en UTF-8 segun RFC 5987 / RFC 6266.
+# ------------------------------------------------------------
+def _build_content_disposition(raw_title: str) -> str:
+    title = (raw_title or "Torrent").strip() or "Torrent"
+    title = re.sub(r'[\\/:*?"<>|\r\n\t]', "_", title)
+
+    ascii_fallback = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii")
+    ascii_fallback = re.sub(r"\s+", " ", ascii_fallback).strip(" .") or "torrent"
+
+    encoded = urllib.parse.quote(f"{title}.torrent", safe="")
+    return f"attachment; filename=\"{ascii_fallback}.torrent\"; filename*=UTF-8''{encoded}"
+
 
 # ------------------------------------------------------------
 # Endpoint de descarga de Kitsunarr. Valida el acceso por API key
@@ -87,10 +110,8 @@ async def proxy_download_torrent(guid: str, suffix: str, request: Request, apike
         except Exception as e:
             logger.error(f"⚠️ No se pudo calcular Info Hash para {guid}: {e}")
 
-        filename = f"{db_torrent.original_title}.torrent".replace("/", "_").replace("\\", "_")
-        
         return Response(
             content=torrent_bytes,
             media_type="application/x-bittorrent",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            headers={"Content-Disposition": _build_content_disposition(db_torrent.original_title)}
         )
