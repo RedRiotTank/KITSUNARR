@@ -418,7 +418,7 @@ class UnionFansubIndexer(BaseIndexer):
                 continue
 
             title_tag = cols[1].find("b", class_="name")
-            title = title_tag.text.strip() if title_tag else "Sin tÃ­tulo"
+            title = title_tag.text.strip() if title_tag else "Sin título"
 
             formatted_fansub = self._extract_fansub_from_list_row(cols[1], title)
             original_title = self._build_original_title(formatted_fansub, title)
